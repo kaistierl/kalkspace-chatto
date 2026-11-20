@@ -12,8 +12,11 @@
 *.tfplan
 crash.log
 crash.*.log
-*.tfvars
-!*.tfvars.example
+# envs/<env>.tfvars is committed; the Hetzner token lives in envs/<env>.secret.tfvars
+*.secret.tfvars
+
+# Ansible inventory hosts are generated from OpenTofu output
+ansible/inventory/*/hosts.yml
 
 # Ansible (the vault password file lives outside the repo; this is a safety net)
 .vault-pass*

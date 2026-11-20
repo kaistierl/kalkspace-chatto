@@ -1,70 +1,70 @@
-# Kalkspace Chatto – Designdokument für den PoC
+# Kalkspace Chatto – Design Document for the PoC
 
 Nov 20, 2026 · @Kai
 
-## Ziel und Scope
+## Goal and scope
 
-Wir testen Chatto in einem Proof of Concept (PoC) als mögliche Alternative zu Slack für den Kalkspace. Der PoC soll zeigen, ob Chatto aus Sicht der Nutzenden und der Admins eine gute Lösung ist. Eine Entscheidung, von Slack zu migrieren, gibt es noch nicht: Darüber entscheidet das Plenum auf Basis der Erfahrungen aus dem PoC. Der PoC läuft auf der kleinsten sinnvollen Hetzner-Cloud-Instanz in Kais eigenem Hetzner-Projekt. Die Architektur entspricht trotzdem schon einem möglichen Produktivbetrieb: Fällt die Entscheidung positiv aus, bauen wir dasselbe Setup aus dem Repo in der Kalkspace-Infrastruktur (vermutlich ebenfalls Hetzner Cloud) neu auf.
+We are testing Chatto in a proof of concept (PoC) as a possible alternative to Slack for Kalkspace. The PoC should show whether Chatto is a good solution from the point of view of both users and admins. There is no decision to migrate away from Slack yet: the plenum decides that based on the experience from the PoC. The PoC runs on the smallest sensible Hetzner Cloud instance in Kai's own Hetzner project. The architecture nevertheless already matches a possible production setup: if the decision is positive, we rebuild the same setup from the repo in the Kalkspace infrastructure (probably also Hetzner Cloud).
 
-Dieses Dokument ist die Vorgabe für die Umsetzung in einem Git-Repo (OpenTofu/Terraform, Ansible, Docker Compose).
+This document is the specification for the implementation in a Git repo (OpenTofu/Terraform, Ansible, Docker Compose).
 
-**Im Scope**
+**In scope**
 
-- Ein Chatto-Server auf einer Hetzner-Cloud-VM, vollständig per Code reproduzierbar
-- Chat, Dateien, Voice/Video-Calls (LiveKit), Web-Push
-- Backups, Restore-Test, Basis-Monitoring, Update-Prozess
+- One Chatto server on a Hetzner Cloud VM, fully reproducible from code
+- Chat, files, voice/video calls (LiveKit), web push
+- Backups, restore test, basic monitoring, update process
 
-**Nicht im Scope des PoC**
+**Out of scope for the PoC**
 
-- Hochverfügbarkeit, NATS-Cluster, mehrere Chatto-Replicas, Kubernetes, externer Object Storage (S3); S3 wird erst bei Bedarf ergänzt
-- Zentrales Identity Management (SSO/OIDC)
-- Die Entscheidung für einen Umstieg und eine echte Slack-Migration; der PoC liefert dafür nur die Grundlage, inklusive eines Import-Probelaufs
+- High availability, NATS cluster, multiple Chatto replicas, Kubernetes, external object storage (S3); S3 is only added if needed
+- Central identity management (SSO/OIDC)
+- The decision to switch and an actual Slack migration; the PoC only provides the basis for that, including an import dry run
 
-## Anforderungen und Annahmen
+## Requirements and assumptions
 
-Die Last wäre auch im Produktivbetrieb klein: knapp 250 Accounts, davon 10–20 regelmäßig aktiv. Neben der Eignung für Nutzende und Admins soll der PoC zeigen, wie wenig Ressourcen Chatto dafür braucht.
+The load would be small even in production: just under 250 accounts, 10–20 of them regularly active. Besides suitability for users and admins, the PoC should show how few resources Chatto needs for this.
 
-| Anforderung | Festlegung |
+| Requirement | Decision |
 | --- | --- |
-| Nutzende | \~250 Accounts, 10–20 aktiv; Phase 1: eine Handvoll Tester:innen |
-| Login | Lokale Accounts (E-Mail + Passwort), keine zentrale IdP |
-| Registrierung | Offen: Selbstregistrierung per E-Mail ist erlaubt |
-| Kosten | So niedrig wie möglich; Instanz nur bei Bedarf vergrößern |
-| Verfügbarkeit | Best effort, Single Host; Ausfall von Minuten bis Stunden ist akzeptabel |
-| Datenverlust | Maximal 24 h bei logischen Fehlern wie Bedienfehler oder kaputtem Update (tägliches Backup). Ein Verlust des Volumes ist in Phase 1 akzeptiert, weil die Backups auf demselben Volume liegen |
-| Standort | Hetzner, Deutschland (FSN1 oder NBG1) |
-| Reproduzierbarkeit | Alles per Code; das Setup muss sich jederzeit neu bauen lassen, auch in einem anderen Hetzner-Projekt |
+| Users | \~250 accounts, 10–20 active; phase 1: a handful of testers |
+| Login | Local accounts (email + password), no central IdP |
+| Registration | Open: self-registration by email is allowed |
+| Cost | As low as possible; only enlarge the instance when needed |
+| Availability | Best effort, single host; an outage of minutes to hours is acceptable |
+| Data loss | At most 24 h for logical errors such as operator mistakes or a broken update (daily backup). Losing the volume is accepted in phase 1, because the backups live on the same volume |
+| Location | Hetzner, Germany (FSN1 or NBG1) |
+| Reproducibility | Everything as code; the setup must be rebuildable at any time, including in a different Hetzner project |
 
-**Annahmen**
+**Assumptions**
 
-- Domain: Der Test läuft unter `chat.cyb3rk4t.me`, das Ziel ist später `chat.kalk.space`. LiveKit liegt jeweils unter `livekit.chat.<domain>`; die Domain ist eine Variable.
-- Es gibt einen SMTP-Zugang für Transaktionsmails (Registrierungscodes, Verifizierung, Passwort-Reset). Ohne SMTP funktioniert der lokale Login nicht sinnvoll.
-- Betrieb durch 1–2 Admins aus dem Space, keine Bereitschaft.
+- Domain: the test runs under `chat.cyb3rk4t.me`, the later target is `chat.kalk.space`. LiveKit lives under `livekit.chat.<domain>` in each case; the domain is a variable.
+- There is SMTP access for transactional mail (registration codes, verification, password reset). Without SMTP, local login doesn't work in any meaningful way.
+- Operated by 1–2 admins from the space, no on-call.
 
-## Architektur
+## Architecture
 
-Alle Komponenten laufen als ein Docker-Compose-Stack auf einer VM. Es gibt kein Postgres: Chattos Daten liegen in NATS JetStream, das als eigener Container läuft, ebenso alle Anhänge.
+All components run as one Docker Compose stack on one VM. There is no Postgres: Chatto's data lives in NATS JetStream, which runs as its own container, and so do all attachments.
 
 ```mermaid
 flowchart LR
-  users(["Nutzende<br/>Browser, App"])
+  users(["Users<br/>browser, app"])
 
-  subgraph vm["Hetzner-VM CX23 · Debian 13 · Docker Compose · hinter Hetzner Cloud Firewall"]
-    livekit["LiveKit<br/>Calls<br/>UDP 7882, 3478<br/>TCP 7881"]
+  subgraph vm["Hetzner VM CX23 · Debian 13 · Docker Compose · behind Hetzner Cloud Firewall"]
+    livekit["LiveKit<br/>calls<br/>UDP 7882, 3478<br/>TCP 7881"]
     caddy["Caddy<br/>HTTPS 443, TLS"]
-    chatto["Chatto 0.5.0<br/>Web, API, WebSocket"]
-    nats[("NATS JetStream<br/>Nachrichten + Anhänge<br/>auf /srv/chatto")]
-    backup["Backup-Timer<br/>nachts, verschlüsselt<br/>nach /srv/chatto/backups"]
-    beszel["Beszel-Agent<br/>Monitoring, Port 45876"]
+    chatto["Chatto 0.5.0<br/>web, API, WebSocket"]
+    nats[("NATS JetStream<br/>messages + attachments<br/>on /srv/chatto")]
+    backup["Backup timer<br/>nightly, encrypted<br/>to /srv/chatto/backups"]
+    beszel["Beszel agent<br/>monitoring, port 45876"]
   end
 
-  smtp(["SMTP<br/>Transaktionsmails"])
-  hub(["Beszel-Hub<br/>Monitoring"])
-  storagebox(["Storage Box<br/>optional, später"])
+  smtp(["SMTP<br/>transactional mail"])
+  hub(["Beszel hub<br/>monitoring"])
+  storagebox(["Storage Box<br/>optional, later"])
 
-  users -->|Media| livekit
+  users -->|media| livekit
   users --> caddy
-  caddy -->|Signaling| livekit
+  caddy -->|signaling| livekit
   caddy --> chatto
   chatto --> nats
   nats --> backup
@@ -79,237 +79,291 @@ flowchart LR
   class storagebox optional
 ```
 
-Caddy terminiert TLS für Chatto und das LiveKit-Signaling. Die Call-Medien gehen am Proxy vorbei direkt an LiveKit. Weil NATS getrennt von Chatto läuft, lässt sich Chatto neu starten oder aktualisieren, ohne den Datenspeicher anzufassen, und später ohne Umbau auf einen NATS-Cluster erweitern.
+Caddy terminates TLS for Chatto and the LiveKit signaling. Call media bypasses the proxy and goes directly to LiveKit. Because NATS runs separately from Chatto, Chatto can be restarted or updated without touching the data store, and can later be extended to a NATS cluster without restructuring.
 
-## Infrastruktur bei Hetzner
+## Infrastructure at Hetzner
 
-Wir starten mit einer CX23 (2 vCPU, 4 GB RAM, 40 GB Disk, x86) für rund 5,49 €/Monat zzgl. IPv4. Ist sie nicht bestellbar, nehmen wir die ARM-Variante CAX11 (gleiche Größe, rund 5,99 €). Chatto veröffentlicht seine Images auch für arm64.
+We start with a CX23 (2 vCPU, 4 GB RAM, 40 GB disk, x86) for about €5.49/month plus IPv4. If it can't be ordered, we use the ARM variant CAX11 (same size, about €5.99). Chatto also publishes its images for arm64.
 
-Laut Berichten waren die Cost-Optimized-Typen (CX/CAX) zwischen August und Oktober 2026 zeitweise nicht bestellbar, und die nächstkleinere Alternative CPX22 kostet nach der Preiserhöhung vom Juni 2026 rund 19,49 €. Preise und Verfügbarkeit vor dem Anlegen im Hetzner-Portal prüfen. Der Servertyp ist deshalb eine Variable im Code.
+According to reports, the cost-optimized types (CX/CAX) were at times not orderable between August and October 2026, and the next smaller alternative, CPX22, costs about €19.49 after the price increase of June 2026. Check prices and availability in the Hetzner console before creating the server. The server type is therefore a variable in the code.
 
-| Ressource | Festlegung | Warum |
+| Resource | Decision | Why |
 | --- | --- | --- |
-| Server | `cx23`, Fallback `cax11`; Image Debian 13 | Kleinste Größe mit 4 GB RAM; Chatto hält Read-Models im Speicher |
-| Swap | 2 GB Swapfile | Puffer gegen OOM-Kills bei Lastspitzen auf 4 GB |
-| Volume | Hetzner Volume, 20 GB, ext4, unter `/srv/chatto` | Daten (Bind-Mounts für NATS und Caddy) und Backups überleben einen Neubau der VM |
-| IP | Eine Primary IPv4 + IPv6, als eigene Ressource | IP bleibt bei Rebuild gleich, DNS muss nicht angepasst werden |
-| Firewall | Hetzner Cloud Firewall (siehe unten) | Nur benötigte Ports offen, unabhängig von der Host-Konfiguration |
-| DNS | `chat.<domain>` und `livekit.chat.<domain>` als A/AAAA | Caddy holt Zertifikate für beide Namen automatisch |
-| Object Storage | Kein externer Object Storage; Anhänge liegen in NATS auf dem Volume | Einfachheit und keine Fixkosten; für die Community-Größe ausreichend |
-| Offsite-Backup | Phase 1: keins, Backups nur auf dem Volume; später optional Storage Box | Geht das Volume verloren, sind auch die Backups weg; für den Test bewusst akzeptiert |
+| Server | `cx23`, fallback `cax11`; image Debian 13 | Smallest size with 4 GB RAM; Chatto keeps read models in memory |
+| Swap | 2 GB swap file | Buffer against OOM kills during load spikes on 4 GB |
+| Volume | Hetzner Volume, 20 GB, ext4, at `/srv/chatto` | Data (bind mounts for NATS and Caddy) and backups survive a rebuild of the VM |
+| IP | One Primary IPv4 + IPv6, as separate resources | The IP stays the same on rebuild, DNS doesn't need to change |
+| Firewall | Hetzner Cloud Firewall (see below) | Only required ports open, independent of the host configuration |
+| DNS | `chat.<domain>` and `livekit.chat.<domain>` as A/AAAA | Caddy obtains certificates for both names automatically |
+| Object storage | No external object storage; attachments live in NATS on the volume | Simplicity and no fixed costs; sufficient for the community's size |
+| Offsite backup | Phase 1: none, backups only on the volume; optionally a Storage Box later | If the volume is lost, the backups are gone too; deliberately accepted for the test |
 
-**Firewall-Regeln (eingehend)**
+**Firewall rules (inbound)**
 
-| Port | Protokoll | Quelle | Zweck |
+| Port | Protocol | Source | Purpose |
 | --- | --- | --- | --- |
-| 22 | TCP | überall (nur Key-Login) | SSH |
-| 80 | TCP | überall | ACME-Challenge, Redirect auf HTTPS |
-| 443 | TCP | überall | Chatto und LiveKit-Signaling über Caddy |
-| 7881 | TCP | überall | LiveKit ICE/TCP-Fallback |
-| 7882 | UDP | überall | LiveKit Media (gemultiplext auf einem Port) |
-| 3478 | UDP | überall | LiveKit TURN/STUN |
-| 45876 | TCP | nur IP des Beszel-Hubs | Beszel-Agent (Hub verbindet sich per SSH), nur wenn aktiviert |
+| 22 | TCP | anywhere (key login only) | SSH |
+| 80 | TCP | anywhere | ACME challenge, redirect to HTTPS |
+| 443 | TCP | anywhere | Chatto and LiveKit signaling via Caddy |
+| 7881 | TCP | anywhere | LiveKit ICE/TCP fallback |
+| 7882 | UDP | anywhere | LiveKit media (multiplexed on one port) |
+| 3478 | UDP | anywhere | LiveKit TURN/STUN |
+| 45876 | TCP | Beszel hub IP only | Beszel agent (hub connects via SSH), only when enabled |
 
-Alle anderen Ports bleiben zu, insbesondere NATS (4222) und Chatto (4000).
+All other ports stay closed, in particular NATS (4222) and Chatto (4000).
 
-**Speicherplatz:** Weil die Anhänge in NATS liegen, enthält jedes tägliche Backup alle Dateien. Die Volume-Belegung wird überwacht, und das Volume wird bei Bedarf online vergrößert.
+**Disk space:** because attachments live in NATS, every daily backup contains all files. Volume usage is monitored, and the volume is resized online when needed.
 
-**Schutz vor Löschen:** Volume und Primary IP bekommen in OpenTofu `lifecycle { prevent_destroy = true }` und den Hetzner-Löschschutz. Das Volume hängt über eine eigene Attachment-Ressource an der VM, sodass die VM ersetzt werden kann, ohne Volume oder IP anzufassen. Ansible mountet das Volume über `/dev/disk/by-id/…` statt über Hetzners Automount.
+**Deletion protection:** the volume and Primary IPs get `lifecycle { prevent_destroy = true }` in OpenTofu and Hetzner's delete protection. The volume is attached to the VM via a separate attachment resource, so the VM can be replaced without touching the volume or IP. Ansible mounts the volume via `/dev/disk/by-id/…` instead of Hetzner's automount.
 
-## Chatto-Konfiguration
+## Chatto configuration
 
-Basis ist das offizielle Beispiel `examples/dockercompose` aus dem Chatto-Repo (Stand v0.5.0 vom 9.11.2026). Die Upstream-`compose.yml` und die `Caddyfile` übernehmen wir unverändert. Alle Anpassungen kommen in eine eigene `compose.override.yml` und in die `.env`, damit sich Upstream-Änderungen leicht nachziehen lassen.
+The basis is the official example `examples/dockercompose` from the Chatto repo (v0.5.0 from Nov 9, 2026). We take the upstream `compose.yml` and `Caddyfile` unchanged. All customizations go into our own `compose.override.yml` and the `.env`, so upstream changes are easy to pull in.
 
-**Abweichungen vom Upstream-Beispiel**
+**Deviations from the upstream example**
 
-- **Feste Versionen statt `latest`:** Chatto `0.5.0`, NATS, LiveKit und Caddy auf konkrete Tags gepinnt. Die Tags wählt die Umsetzung zum aktuellen Stand und trägt sie als Variablen ein.
-- **Secrets nicht per `init-env.sh`:** Ansible erzeugt die Secrets beim ersten Lauf und legt sie verschlüsselt im Repo ab (Ansible Vault). Die `.env` und `livekit.generated.yaml` werden daraus gerendert. So bleiben die Secrets bei einem Neubau der VM gleich.
-- **Speicherlimits pro Container** (Startwerte, im Test nachjustieren):
+- **Pinned versions instead of `latest`:** Chatto `0.5.0`, NATS, LiveKit and Caddy are pinned to a specific tag plus digest (`image:tag@sha256:…`). The implementation chooses the current tags and records them in the central version file (see Conventions).
+- **Secrets not via `init-env.sh`:** secrets are generated once per environment on the admin machine (`just secrets-init <env>`) and stored encrypted in the repo (Ansible Vault). The `.env` and `livekit.generated.yaml` are rendered from it on every deploy. This keeps the secrets stable across VM rebuilds.
+- **Memory limits per container** (starting values, adjust during the test):
 
-| Container | Limit | Hinweis |
+| Container | Limit | Note |
 | --- | --- | --- |
-| chatto | 1536 MB | `GOMEMLIMIT` setzt Chatto automatisch auf 90 % des Limits |
-| nats | 768 MB | JetStream mit `sync_interval: always` aus dem Upstream-Beispiel |
-| livekit | 512 MB | Calls mit wenigen Teilnehmenden |
-| caddy | 128 MB | Reverse Proxy und TLS |
+| chatto | 1536 MB | Chatto sets `GOMEMLIMIT` to 90 % of the limit automatically |
+| nats | 768 MB | JetStream with `sync_interval: always` from the upstream example |
+| livekit | 512 MB | Calls with few participants |
+| caddy | 128 MB | Reverse proxy and TLS |
 
-Zusammen knapp 3 GB; der Rest bleibt für OS, Docker und Page Cache.
+Just under 3 GB in total; the rest is left for the OS, Docker and the page cache.
 
-**Daten auf dem Volume:** Der Override ersetzt die benannten Docker-Volumes durch Bind-Mounts unter `/srv/chatto` (Compose führt Volumes mit gleichem Container-Pfad zusammen):
+**Data on the volume:** the override replaces the named Docker volumes with bind mounts under `/srv/chatto` (Compose merges volumes with the same container path):
 
-| Host-Pfad | Container | Inhalt |
+| Host path | Container | Contents |
 | --- | --- | --- |
-| `/srv/chatto/nats` | nats: `/data` | NATS JetStream inkl. Anhänge |
-| `/srv/chatto/caddy/data` | caddy: `/data` | TLS-Zertifikate |
-| `/srv/chatto/caddy/config` | caddy: `/config` | Caddy-Laufzeitkonfiguration |
-| `/srv/chatto/backups` | chatto: `/backups` | Backup-Archive (Modus 700) |
-| `/srv/chatto/import` | chatto: `/import` | Slack-Archive für den Import (Modus 700) |
+| `/srv/chatto/nats` | nats: `/data` | NATS JetStream incl. attachments |
+| `/srv/chatto/caddy/data` | caddy: `/data` | TLS certificates |
+| `/srv/chatto/caddy/config` | caddy: `/config` | Caddy runtime configuration |
+| `/srv/chatto/backups` | chatto: `/backups` | Backup archives (mode 700) |
+| `/srv/chatto/import` | chatto: `/import` | Slack archives for the import (mode 700) |
 
-Images, Container und Logs bleiben in Docker auf der Root-Disk; sie lassen sich jederzeit neu erzeugen.
+Images, containers and logs stay in Docker on the root disk; they can be recreated at any time.
 
-**Wichtige Einstellungen**
+**Key settings**
 
-| Bereich | Variable | Wert |
+| Area | Variable | Value |
 | --- | --- | --- |
-| Owner | `CHATTO_OWNERS_EMAILS` | E-Mail des ersten Admin-Accounts |
-| Registrierung | `CHATTO_AUTH_DIRECT_REGISTRATION` | `true` (Default), Selbstregistrierung offen |
-| Login | `CHATTO_AUTH_DIRECT_LOGIN` | `true` (Default), da keine SSO |
-| Mail | `CHATTO_SMTP_*` | SMTP mit STARTTLS auf 587 |
-| Anhänge | `CHATTO_CORE_ASSETS_STORAGE_BACKEND` | `nats` (Default), kein externes S3 |
-| Calls | `CHATTO_LIVEKIT_*` | aktiviert, URL `wss://livekit.chat.<domain>` |
-| Push | `CHATTO_PUSH_ENABLED`, `CHATTO_PUSH_VAPID_*` | aktiviert; VAPID-Keys im Vault |
-| Video | `CHATTO_VIDEO_ENABLED` | `false` (Transcoding braucht CPU, die wir nicht haben) |
-| Operator-API | `CHATTO_OPERATOR_API_*` | wie Upstream; der Socket bleibt im Container |
+| Owner | `CHATTO_OWNERS_EMAILS` | Email of the first admin account |
+| Registration | `CHATTO_AUTH_DIRECT_REGISTRATION` | `true` (default), self-registration open |
+| Login | `CHATTO_AUTH_DIRECT_LOGIN` | `true` (default), since there is no SSO |
+| Mail | `CHATTO_SMTP_*` | SMTP with STARTTLS on 587 |
+| Attachments | `CHATTO_CORE_ASSETS_STORAGE_BACKEND` | `nats` (default), no external S3 |
+| Calls | `CHATTO_LIVEKIT_*` | enabled, URL `wss://livekit.chat.<domain>` |
+| Push | `CHATTO_PUSH_ENABLED`, `CHATTO_PUSH_VAPID_*` | enabled; VAPID keys in the vault |
+| Video | `CHATTO_VIDEO_ENABLED` | `false` (transcoding needs CPU we don't have) |
+| Operator API | `CHATTO_OPERATOR_API_*` | as upstream; the socket stays inside the container |
 
-Upload-Limits bleiben beim Default von 25 MB pro Datei.
+Upload limits stay at the default of 25 MB per file.
 
-## Betrieb
+## Operations
 
-### Backup und Restore
+### Backup and restore
 
-Täglich läuft ein verschlüsseltes Chatto-Backup inklusive der Schlüssel; in Phase 1 bleibt es auf dem Volume. Ohne die Schlüssel sind die Nachrichten wegen der Verschlüsselung pro Account nicht wiederherstellbar.
+An encrypted Chatto backup including the keys runs daily; in phase 1 it stays on the volume. Without the keys, messages can't be restored because of the per-account encryption.
 
-1. Ein systemd-Timer führt täglich nachts `docker compose run --rm -T chatto backup --encrypt --include-keys --passphrase-stdin < /etc/chatto/backup-passphrase` aus. Die Passphrase-Datei hat Modus 600.
-2. Das Archiv landet im Backup-Verzeichnis auf dem Volume (Modus 700). Ein Offsite-Sync (z. B. Storage Box) ist im Code vorbereitet, aber standardmäßig aus.
-3. Die Anhänge liegen in NATS und sind damit in jedem Archiv enthalten. Aufbewahrung: 7 Tage, bei knappem Platz weniger.
-4. `.env` und `livekit.generated.yaml` entstehen bei jedem Deploy aus dem Vault im Repo. Vault-Passwort und Backup-Passphrase liegen außerhalb des Servers im Passwortmanager (siehe Security).
-5. Schlägt der Job fehl, geht eine Mail an die Admins (siehe Mailversand vom Host).
-6. Der Restore wird vor dem Rollout einmal komplett durchgespielt: Archiv vorher lokal sichern, dann frische VM mit leerem Volume und Restore aus dem Archiv (siehe Phasen).
+1. A systemd timer runs `docker compose run --rm -T chatto backup --encrypt --include-keys --passphrase-stdin < /etc/chatto/backup-passphrase` every night. The passphrase file has mode 600.
+2. The archive goes into the backup directory on the volume (mode 700). An offsite sync (e.g. Storage Box) is prepared in the code but off by default.
+3. Attachments live in NATS and are therefore included in every archive. Retention: 7 days, less if space is tight.
+4. `.env` and `livekit.generated.yaml` are created from the vault in the repo on every deploy. The vault passwords and the backup passphrase are stored outside the server in the password manager (see Security).
+5. If the job fails, a mail goes to the admins (see Mail from the host).
+6. The restore is rehearsed end to end once before rollout: first save the archive locally, then a fresh VM with an empty volume and a restore from the archive (see Phases).
 
-Regeln: `/srv/chatto/nats` nie im laufenden Betrieb kopieren und nie `docker compose down` ausführen, weil das NATS stoppt. Hetzner-Snapshots der VM sind nur ein Zusatz, kein Ersatz.
+Rules: never copy `/srv/chatto/nats` while it is running, and never run `docker compose down`, because that stops NATS. Hetzner snapshots of the VM are only an addition, not a replacement.
 
-### Mailversand vom Host
+### Mail from the host
 
-Der Host verschickt Systemmails mit Debian-Standardpaketen über denselben SMTP-Server wie Chatto: `msmtp-mta` stellt `/usr/sbin/sendmail` bereit, `bsd-mailx` den Befehl `mail`. Zugangsdaten kommen aus dem Vault in `/etc/msmtprc` (Modus 600). Ein systemd-Template `notify-failure@.service` wird per `OnFailure=` an Backup und andere Timer gehängt; `unattended-upgrades` und cron nutzen denselben Weg. Die Mails gehen an einen Admin-Alias in `/etc/aliases`.
+The host sends system mail with standard Debian packages through the same SMTP server as Chatto: `msmtp-mta` provides `/usr/sbin/sendmail`, `bsd-mailx` the `mail` command. Credentials come from the vault into `/etc/msmtprc` (mode 600). A systemd template `notify-failure@.service` is attached to the backup and other timers via `OnFailure=`; `unattended-upgrades` and cron use the same path. Mail goes to an admin alias in `/etc/aliases`.
 
 ### Logs
 
-Docker nutzt den Log-Treiber `local` (in `/etc/docker/daemon.json`), der Container-Logs selbst rotiert. Das systemd-Journal wird per `SystemMaxUse=500M` begrenzt. So kann die 40-GB-Root-Disk nicht volllaufen.
+Docker uses the `local` log driver (in `/etc/docker/daemon.json`), which rotates container logs itself. The systemd journal is capped with `SystemMaxUse=500M`. This way the 40 GB root disk can't fill up.
 
 ### Updates
 
-- Versionen sind gepinnt; ein Update ist eine Änderung im Repo (Pull Request) plus ein Ansible-Lauf.
-- Vor jedem Chatto-Update: Release Notes lesen, Backup ziehen, danach Logs und System-Seite im Admin prüfen. Bei 0.4 → 0.5 schreibt die Doku explizit kein Rolling Deployment vor; bei einem Single Host ist das ohnehin so.
-- OS-Sicherheitsupdates per `unattended-upgrades`, Neustarts manuell im Wartungsfenster.
+- Versions are pinned; an update is a change in the repo (pull request) plus an Ansible run, first against `test`, then against `prod`.
+- Before every Chatto update: read the release notes, take a backup, afterwards check the logs and the system page in the admin UI. For 0.4 → 0.5 the docs explicitly don't prescribe a rolling deployment; with a single host that's the case anyway.
+- OS security updates via `unattended-upgrades`, reboots manually in a maintenance window.
 
 ### Monitoring
 
-- **Testprojekt: Beszel.** Der Beszel-Agent läuft als Container in einem eigenen Compose-Projekt der Rolle beszel, getrennt vom Chatto-Stack (`henrygd/beszel-agent`, gepinnt) mit Host-Netzwerk und Docker-Socket read-only. Kais bestehender Beszel-Hub verbindet sich per SSH zum Agent auf Port 45876 (`LISTEN=45876`); der Public Key des Hubs (`KEY`) liegt im Vault. Die Cloud Firewall lässt Port 45876 nur von der IP des Hubs zu.
-- Das Volume wird zusätzlich unter `/extra-filesystems` in den Agent gemountet, damit Beszel dessen Belegung getrennt von der Root-Disk zeigt.
-- Alarme im Hub: Root-Disk und Volume ab 80 % Belegung, RAM, System offline.
-- Chatto-interne Werte (Streams, Projections, Worker, LiveKit) zeigt die System-Seite im Chatto-Admin.
-- Für den Ressourcentest liefert Beszel den Verlauf von RAM und CPU pro Container. Dazu notieren wir die Startdauer von Chatto und die Größe der NATS-Daten.
-- Späterer Betrieb: Monitoring nach dem, was der Kalkspace nutzt (offener Punkt). Der Beszel-Agent ist per Flag abschaltbar.
+- **Test project: Beszel.** The Beszel agent runs as a container in a separate Compose project of the `beszel` role, separate from the Chatto stack (`henrygd/beszel-agent`, pinned), with host networking and the Docker socket read-only. Kai's existing Beszel hub connects to the agent via SSH on port 45876 (`LISTEN=45876`); the hub's public key (`KEY`) is stored in the vault. The Cloud Firewall only allows port 45876 from the hub's IP.
+- The volume is additionally mounted into the agent under `/extra-filesystems`, so Beszel shows its usage separately from the root disk.
+- Alerts in the hub: root disk and volume at 80 % usage, RAM, system offline.
+- Chatto-internal metrics (streams, projections, workers, LiveKit) are shown on the system page in the Chatto admin UI.
+- For the resource test, Beszel provides RAM and CPU history per container. In addition we record Chatto's startup time and the size of the NATS data.
+- Later operations: monitoring according to what Kalkspace uses (open question). The Beszel agent can be switched off via a flag.
 
 ### Security
 
-- SSH nur mit Keys; Root-Login ist erlaubt, Passwort-Login ist aus.
-- Keine Host-Firewall: Die Hetzner Cloud Firewall ist die einzige Filterebene. Deshalb veröffentlicht Docker nur die Ports aus der Firewall-Tabelle.
-- Secrets nur im Ansible Vault, nie im Klartext im Repo. Das Vault-Passwort liegt in Kais Passwortmanager und lokal als Datei außerhalb des Repos, auf die ansible.cfg verweist. Die Backup-Passphrase liegt zusätzlich getrennt im Passwortmanager. Vor dem Neuaufbau in der Kalkspace-Infra wandern beide ins Kalkspace-Bitwarden.
-- Beim ersten Start Zugriff einschränken, bis der Setup-Wizard durch ist: Der erste Besucher kann Owner werden. Dafür ist `CHATTO_OWNERS_EMAILS` gesetzt, und der Wizard wird direkt nach dem Deploy durchlaufen.
+- SSH with keys only; root login is allowed, password login is disabled.
+- No host firewall: the Hetzner Cloud Firewall is the only filtering layer. Therefore Docker only publishes the ports from the firewall table.
+- Secrets only in Ansible Vault, never in plain text in the repo. Each environment has its own vault password. The vault passwords are stored in Kai's password manager and locally as files outside the repo (`~/.config/kalkspace-chatto/vault-pass-<env>`), which the `justfile` passes via `--vault-id <env>@…`. The backup passphrase is additionally stored separately in the password manager. Before the rebuild in the Kalkspace infrastructure, they move to Kalkspace's Bitwarden.
+- Restrict access on first start until the setup wizard is done: the first visitor can become owner. For this, `CHATTO_OWNERS_EMAILS` is set, and the wizard is completed right after the deploy.
 
-**Rechte bei offener Registrierung:** Rollen und Raumgruppen werden in der Chatto-Weboberfläche eingestellt und stehen als Checkliste in der README, nicht in der Automatisierung. Neue Accounts bekommen nur eine Basisrolle; interne Kanäle liegen in einer eigenen Raumgruppe, da Raumgruppen in Chatto die Grenzen für Berechtigungen sind.
+**Permissions with open registration:** roles and room groups are configured in the Chatto web UI and documented as a checklist in the README, not in the automation. New accounts get only a base role; internal channels live in their own room group, since room groups are the permission boundaries in Chatto.
 
-### Slack-Migration
+### Slack migration
 
-Chatto bringt einen Slack-Import mit: Ein Konverter macht aus dem Slack-Export ein portables Archiv, das `chatto operator import` über die Operator-API einspielt. Im PoC proben wir den Import nur, um zu sehen, was mitkommt und was verloren geht. Eine echte Migration gibt es nur nach einer positiven Entscheidung im Plenum, dann in die neue Kalkspace-Instanz, bevor dort jemand schreibt. Testdaten nehmen wir nicht mit.
+Chatto ships a Slack import: a converter turns the Slack export into a portable archive, which `chatto operator import` loads via the operator API. In the PoC we only rehearse the import, to see what comes over and what gets lost. An actual migration only happens after a positive plenum decision, then into the new Kalkspace instance, before anyone writes there. We don't carry over test data.
 
-| Thema | Festlegung |
+| Topic | Decision |
 | --- | --- |
-| Werkzeuge | `tools/slack/slack-export.py` aus dem Chatto-Repo (Python 3.11, `uv`) auf einem Admin-Rechner; danach `chatto operator import` im Chatto-Container |
-| Ablauf | `--report-only` zeigt Blocker und Lücken, `--validate-only` prüft gegen das Ziel ohne Schreibzugriff, dann der Import mit `--accept-omissions` |
-| Was mitkommt | Kanäle inkl. Thema und Sichtbarkeit, Mitgliedschaften, Nachrichten, Threads, Reaktionen, Dateien (Default bis 25 MiB pro Datei, 1 GiB Download pro Lauf) |
-| Accounts | Slack-Username bleibt; keine Passwörter, keine Rollen. E-Mails kommen aus dem Export oder per temporärer Slack-App mit `users:read.email`; Chatto ordnet beim Import per E-Mail zu |
-| Zielinstanz | Der Import legt neue Kanäle an und führt keine bestehende Historie zusammen; importierte Kanäle bis zum Abschluss nicht nutzen. Abgebrochene Läufe lassen sich mit gleichen Optionen fortsetzen |
-| Infrastruktur | Ein Import-Verzeichnis auf dem Volume (`/srv/chatto/import`, Modus 700) wird in den Chatto-Container gemountet; Dateien landen über Chatto in NATS, das Volume vorher passend vergrößern. Für den Lauf die VM ggf. temporär vergrößern |
-| Datenschutz | Export, Download-Cache und Archiv enthalten private Daten: nie ins Git-Repo, nach der Migration löschen |
+| Tools | `tools/slack/slack-export.py` from the Chatto repo (Python 3.11, `uv`) on an admin machine; then `chatto operator import` in the Chatto container |
+| Procedure | `--report-only` shows blockers and gaps, `--validate-only` checks against the target without writing, then the import with `--accept-omissions` |
+| What comes over | Channels incl. topic and visibility, memberships, messages, threads, reactions, files (default up to 25 MiB per file, 1 GiB download per run) |
+| Accounts | Slack username is kept; no passwords, no roles. Emails come from the export or via a temporary Slack app with `users:read.email`; Chatto matches by email during import |
+| Target instance | The import creates new channels and doesn't merge existing history; don't use imported channels until it's finished. Aborted runs can be resumed with the same options |
+| Infrastructure | An import directory on the volume (`/srv/chatto/import`, mode 700) is mounted into the Chatto container; files end up in NATS via Chatto, so resize the volume beforehand. Temporarily enlarge the VM for the run if needed |
+| Privacy | Export, download cache and archive contain private data: never in the Git repo, delete after the migration |
 
-Das Archivformat ist laut Chatto noch ein Entwurf. Der Probelauf soll zeigen, was verloren geht, bevor wir uns festlegen.
+According to Chatto, the archive format is still a draft. The dry run should show what gets lost before we commit to anything.
 
-## Repo-Struktur und Umsetzungsvorgaben
+## Repo structure and implementation requirements
 
-Das Repo hat drei Schichten mit klarer Grenze: OpenTofu legt die Hetzner-Ressourcen an, Ansible richtet den Host ein und deployt, Docker Compose betreibt die Anwendung.
+The repo has three layers with a clear boundary: OpenTofu creates the Hetzner resources, Ansible sets up the host and deploys, Docker Compose runs the application.
 
 ```text
 kalkspace-chatto/
-├── README.md                  # Bootstrap, Deploy, Backup, Restore, Update
-├── justfile                   # plan, apply, deploy, backup-now, restore
-├── docs/design.md             # dieses Dokument
+├── README.md                    # bootstrap, deploy, backup, restore, update
+├── CLAUDE.md
+├── justfile                     # all operator commands; environment as an explicit argument
+├── mise.toml                    # pinned tool versions: OpenTofu, Ansible, ansible-lint, yamllint, just
+├── docs/design.md               # this document
 ├── terraform/
-│   ├── main.tf                # Server, Primary IP, Volume, Firewall, SSH-Key
-│   ├── dns.tf                 # optional, nur wenn die Zone bei Hetzner DNS liegt (Test: extern, manuell)
-│   ├── variables.tf           # hcloud_token, server_type, location, beszel_hub_ip, domain
-│   └── outputs.tf             # IPs, erzeugt Ansible-Inventory
+│   ├── main.tf                  # server, Primary IPs, volume, firewall, SSH key
+│   ├── dns.tf                   # optional, only if the zone is in Hetzner DNS (test: external, manual)
+│   ├── variables.tf             # hcloud_token, server_type, location, beszel_hub_ip, domain
+│   ├── outputs.tf               # IPs and domain, used to generate the Ansible inventory
+│   ├── .terraform.lock.hcl      # committed
+│   └── envs/
+│       ├── test.tfvars          # committed, no secrets
+│       ├── test.secret.tfvars   # hcloud_token (gitignored)
+│       └── prod.tfvars
 ├── ansible/
+│   ├── ansible.cfg
+│   ├── requirements.yml         # pinned collections
 │   ├── site.yml
-│   ├── reset.yml              # nur Test: NATS-Daten leeren
-│   ├── inventory/             # aus Terraform-Output generiert
+│   ├── reset.yml                # test only: empty NATS data
+│   ├── secrets-init.yml         # runs locally: generates missing secrets into an environment's vault
 │   ├── group_vars/all/
-│   │   ├── vars.yml           # Versionen, Domain, Limits, Feature-Flags
-│   │   └── vault.yml          # Secrets (Ansible Vault)
-│   └── roles/
-│       ├── base/              # Debian 13, Updates, SSH nur mit Keys, Swap, msmtp
-│       ├── volume/            # Hetzner Volume mounten
-│       ├── docker/            # Docker Engine + Compose v2 aus dem Docker-Repo
-│       ├── chatto/            # Compose-Stack, .env, LiveKit-Config, Deploy
-│       ├── backup/            # systemd-Timer, optional Offsite, Fehler-Mail
-│       └── beszel/            # Beszel-Agent (eigenes Compose-Projekt), per Flag abschaltbar
+│   │   └── versions.yml         # pinned image versions (tag + digest), identical for all environments
+│   ├── inventory/
+│   │   ├── test/
+│   │   │   ├── hosts.yml        # generated from OpenTofu output (gitignored)
+│   │   │   └── group_vars/all/
+│   │   │       ├── vars.yml     # environment settings, feature flags, vault references
+│   │   │       └── vault.yml    # secrets (Ansible Vault, vault id "test")
+│   │   └── prod/                # same layout, vault id "prod"
+│   └── roles/                   # each role has defaults/main.yml with prefixed defaults
+│       ├── base/                # Debian 13, updates, SSH keys only, swap, msmtp
+│       ├── volume/              # mount Hetzner Volume
+│       ├── docker/              # Docker Engine + Compose v2 from the Docker repo
+│       ├── chatto/              # Compose stack, .env, LiveKit config, deploy
+│       ├── backup/              # systemd timer, optional offsite, failure mail
+│       └── beszel/              # Beszel agent (separate Compose project), switchable via flag
 └── compose/
-    ├── compose.yml            # unverändert aus Upstream v0.5.0
-    ├── Caddyfile              # unverändert aus Upstream v0.5.0
-    ├── nats-server.conf       # unverändert aus Upstream v0.5.0
-    ├── compose.override.yml   # Pins, Speicherlimits, Bind-Mounts
-    ├── env.j2                 # Template für .env
-    └── livekit.yaml.j2        # Template für die LiveKit-Config
+    ├── compose.yml              # unchanged from upstream v0.5.0
+    ├── Caddyfile                # unchanged from upstream v0.5.0
+    ├── nats-server.conf         # unchanged from upstream v0.5.0
+    ├── compose.override.yml     # pins, memory limits, bind mounts
+    ├── env.j2                   # template for .env
+    └── livekit.yaml.j2          # template for the LiveKit config
 ```
 
-**Vorgaben für die Umsetzung**
+**Implementation requirements**
 
-1. OpenTofu mit dem `hcloud`-Provider; State zunächst lokal und per .gitignore aus dem Repo heraus; ein Remote-Backend kommt beim Umzug in die Kalkspace-Infra.
-2. Kein eigenes cloud-init: Den SSH-Key für root hinterlegt Hetzner über hcloud\_ssh\_key am Server, und Ansible verbindet sich als root. Das Hetzner-Image bringt Python mit, das beim ersten Lauf geprüft wird; fehlt es, installiert Ansible es per raw-Modul nach. Alles andere ist idempotentes Ansible, damit Konfigurationsänderungen ohne Rebuild gehen.
-3. Ansible muss gegen eine frische VM mit vorhandenem Volume laufen können und dabei bestehende Daten unangetastet lassen (Rebuild-Szenario).
-4. Die Ansible-Rolle `chatto` startet Container mit `docker compose up -d` und verwendet nie `down`.
-5. Upstream-Dateien werden mit Herkunft und Version im Kopf kommentiert, damit Updates als Diff nachvollziehbar sind.
-6. Feature-Flags in `vars.yml`: `chatto_push_enabled`, `chatto_direct_registration`, `backup_offsite_enabled`, `beszel_agent_enabled`. LiveKit ist fester Bestandteil und hat kein Flag.
-7. Ein `justfile` mit den Rezepten `plan`, `apply`, `deploy`, `backup-now` und `restore <archiv>`. Wir nehmen `just` statt `make`, weil keines der Ziele Dateien erzeugt. Außerdem nimmt `just` Argumente direkt entgegen (z. B. das Archiv beim Restore), und Rezepte laufen als zusammenhängendes Shell-Skript. `just --list` zeigt alle Rezepte mit Beschreibung. `just` steht neben OpenTofu und Ansible in der README unter den Voraussetzungen (`brew install just` bzw. `apt install just`).
-8. README beschreibt den Erstaufbau Schritt für Schritt inklusive Setup-Wizard und Restore. Reihenfolge: OpenTofu anwenden, dann die DNS-Records setzen und prüfen, dass sie auflösen, dann der Ansible-Deploy, dann sofort den Setup-Wizard durchlaufen. Ohne auflösende DNS-Records scheitert Caddy beim Zertifikat.
+1. OpenTofu with the `hcloud` provider, pinned with `~>`; the lock file is committed. State is local for now and kept out of the repo via .gitignore; a remote backend comes with the move to the Kalkspace infrastructure.
+2. No custom cloud-init: Hetzner installs the SSH key for root via `hcloud_ssh_key` on the server, and Ansible connects as root. The Hetzner image ships Python, which is checked on the first run; if it's missing, Ansible installs it via the `raw` module. Everything else is idempotent Ansible, so configuration changes work without a rebuild.
+3. Ansible must be able to run against a fresh VM with an existing volume and leave existing data untouched (rebuild scenario).
+4. The Ansible role `chatto` starts containers with `docker compose up -d` and never uses `down`.
+5. Upstream files carry a header comment with their origin and version, so updates can be followed as a diff (format see Conventions).
+6. Feature flags: `chatto_push_enabled`, `chatto_direct_registration`, `backup_offsite_enabled`, `beszel_agent_enabled`. Their defaults are in the role defaults; each environment sets them explicitly in its `vars.yml`. LiveKit is a fixed component and has no flag.
+7. A `justfile` with these recipes. The environment (`test` or `prod`) is always a required argument with no default, so nobody deploys or resets prod by accident.
 
-**Zwei Umgebungen aus einem Repo:** Alles Umgebungsspezifische (Hetzner-Token, Domain, Owner-Mail, SMTP) liegt in Variablen bzw. im Vault. Dasselbe Repo deployt so erst ins Testprojekt unter `chat.cyb3rk4t.me` und später in die Kalkspace-Infra unter `chat.kalk.space`.
+   | Recipe | Purpose |
+   | --- | --- |
+   | `just lint` | `tofu fmt -check`, `tofu validate`, `ansible-lint`, `yamllint` |
+   | `just plan <env>` / `just apply <env>` | OpenTofu in workspace `<env>` with `envs/<env>.tfvars` and `envs/<env>.secret.tfvars`; `apply` regenerates `inventory/<env>/hosts.yml` |
+   | `just secrets-init <env>` | Generate missing secrets into the vault (see Conventions) |
+   | `just deploy <env>` | `ansible-playbook site.yml` against `inventory/<env>` |
+   | `just backup-now <env>` | Run the backup immediately |
+   | `just restore <env> <archive>` | Restore from an archive |
+   | `just reset <env>` | Run `reset.yml`; refuses anything but a test environment |
 
-**Testinstanz zurücksetzen:** Das Playbook `reset.yml` stoppt Chatto und NATS, leert `/srv/chatto/nats` und startet beides neu. Es läuft nur, wenn die Umgebung als Test markiert ist, und fragt vorher nach einer Bestätigung. Zertifikate und Backups bleiben erhalten.
+   We use `just` instead of `make` because none of the targets produce files. `just` also takes arguments directly, and recipes can run as one coherent shell script. `just --list` shows all recipes with their descriptions.
+8. The README describes the initial setup step by step, including the setup wizard and the restore. Order: install the tools (`mise install`), apply OpenTofu, then set the DNS records and check that they resolve, then the Ansible deploy, then complete the setup wizard immediately. Without resolving DNS records, Caddy fails to obtain its certificate.
 
-## Phasen und offene Entscheidungen
+**Two environments from one repo:** everything environment-specific lives in the environment's files, never in shared code. OpenTofu uses one workspace per environment (`test`, `prod`) and the matching `envs/<env>.tfvars`; each environment has its own Hetzner project, so the `hcloud_token` lives in the gitignored `envs/<env>.secret.tfvars`. The domain is defined once in the tfvars; `apply` writes it together with the IPs into the generated inventory. Ansible has one inventory directory per environment with its own `group_vars` and its own vault. This way the same repo first deploys to the test project under `chat.cyb3rk4t.me` and later to the Kalkspace infrastructure under `chat.kalk.space`.
 
-Der PoC umfasst die Phasen 1 bis 4 und endet mit der Entscheidung im Plenum. Nur bei einer positiven Entscheidung folgen die Phasen 5 und 6. Jede Phase endet mit einer Prüfung, bevor die nächste beginnt.
+**Resetting the test instance:** the playbook `reset.yml` stops Chatto and NATS, empties `/srv/chatto/nats` and starts both again. It only runs if the inventory sets `chatto_env: test`, and asks for confirmation first. Certificates and backups are kept.
 
-1. **Aufbau im Testprojekt:** Repo, VM und Stack unter `chat.cyb3rk4t.me` in Kais Hetzner-Projekt; Owner-Account angelegt, Backup läuft. Fertig, wenn zwei Tests klappen: ein Neubau der VM mit vorhandenem Volume, bei dem alle Daten erhalten bleiben, und ein Restore-Test. Dafür das Backup-Archiv vorher lokal sichern, dann mit frischem, leerem Volume neu bauen und aus dem Archiv wiederherstellen.
-2. **Test mit 5–10 Leuten (ca. 4 Wochen):** Chat, Dateien, Calls, Push auf Desktop und Handy nutzen. Fertig, wenn diese Kriterien erfüllt sind:
-   - Chatto-Container bleibt unter seinem Speicherlimit, ohne OOM-Kill.
-   - Ein Call mit 4–5 Teilnehmenden läuft stabil, auch aus dem Mobilfunknetz.
-   - Nachrichten kommen ohne spürbare Verzögerung an; Push funktioniert.
-   - Das Backup läuft jeden Tag durch, und das Volume hat genug Reserve.
-   - Feedback der Tester:innen und der Admins ist gesammelt, z. B. per kurzer Umfrage.
-3. **Probelauf Slack-Import im Testprojekt:** Export konvertieren, Report prüfen, in eine frisch zurückgesetzte Testinstanz importieren und Ergebnis, Dauer und Ressourcenbedarf notieren. Dabei die Größe der Slack-Dateien ermitteln; sie bestimmt die Volume-Größe und ob S3 doch nötig wird. Fertig, wenn die Lücken bekannt sind.
-4. **Entscheidung im Plenum:** Erfahrungen der Nutzenden und Admins, Ressourcenbedarf und Ergebnis des Import-Probelaufs zusammenfassen und im Plenum vorstellen. Fällt die Entscheidung negativ aus, wird das Testprojekt abgebaut.
-5. **Neuaufbau in der Kalkspace-Infra** (nur nach positiver Entscheidung): dasselbe Repo in einem Kalkspace-Hetzner-Projekt unter `chat.kalk.space` ausrollen, leer und ohne Testdaten; Instanzgröße anhand der Messwerte festlegen.
-6. **Slack-Migration und Rollout an alle (\~250 Accounts):** frischen Export importieren, Accounts aktivieren, Leute einladen, Slack auf Lesezugriff stellen.
+### Conventions
 
-**Offene Entscheidungen**
+**Language:** everything in the repo is in English: docs, README, code, comments, variable names, commit messages and PRs.
 
-- [ ] **Aktivierung importierter Accounts:** Wie bekommen importierte Slack-Accounts (ohne Passwort) Zugang, etwa per Passwort-Reset-Mail? Und wird eine Selbstregistrierung mit derselben E-Mail dem importierten Account zugeordnet?
-- [ ] **SMTP-Zugang:** Welcher Mailserver bzw. Account wird für Transaktionsmails genutzt, im Test und später im Kalkspace?
-- [ ] **DNS:** `cyb3rk4t.me` liegt extern, die Records werden dort manuell gesetzt. Wo liegt das DNS von `kalk.space`?
-- [ ] **Slack-Plan und Umfang:** Welchen Slack-Plan hat der Kalkspace, und welche Daten bekommen wir damit in den Export (öffentliche Kanäle, private Kanäle, DMs, wie weit zurück)? Welche Kanäle sollen mit?
-- [ ] **Offsite-Backup (später):** Storage Box oder vorhandener Speicher im Space? Spätestens vor dem Rollout an alle klären.
-- [ ] **Monitoring im späteren Betrieb:** Was nutzt der Kalkspace für Monitoring und Alarme? Danach richtet sich, ob Beszel bleibt oder ersetzt wird.
-- [ ] **Update-Prozess für gepinnte Versionen (später):** Renovate im Repo einrichten, das für neue Versionen von Chatto, NATS, LiveKit, Caddy und Beszel automatisch Pull Requests öffnet. Dazu ein Watch auf Chattos GitHub-Releases und Security Advisories.
-- [ ] **Ablage des OpenTofu-States im Kalkspace-Betrieb:** Im Test liegt der State lokal. Für den Betrieb durch mehrere Admins braucht es einen gemeinsamen Ort. Möglich sind ein S3-Backend (z. B. Hetzner Object Storage mit Lockfile), das HTTP-Backend einer vorhandenen GitLab- oder Forgejo-Instanz des Space, oder ein mit OpenTofu State Encryption verschlüsselter State direkt im Repo. Vor dem Neuaufbau in der Kalkspace-Infra klären.
+**Git workflow:** every change goes through a short-lived branch and a pull request into `main`, also when working alone. PRs are squash-merged. Commit messages and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/), with the role or layer as scope (`feat(chatto): …`, `fix(backup): …`, `chore(deps): …`).
 
-## Quellen
+**Tool versions:** OpenTofu, Ansible, ansible-lint, yamllint and `just` are pinned in `mise.toml`, so all admins work with the same versions. Ansible collections are pinned in `ansible/requirements.yml`.
 
-- [Chatto-Dokumentation](https://docs.chatto.run)
-- Chatto Docs: [Docker-Compose-Deployment](https://docs.chatto.run/guides/deployment/docker-compose/)
-- Chatto Docs: [Horizontal Scaling](https://docs.chatto.run/guides/infrastructure/horizontal-scaling/)
-- Chatto Docs: [Media & Attachments](https://docs.chatto.run/guides/infrastructure/media-attachments/)
-- Chatto Docs: [Server Operations](https://docs.chatto.run/guides/operations/server-operations/)
-- [Chatto-Repo, examples/dockercompose (v0.5.0)](https://github.com/chattocorp/chatto)
+**Image versions:** all images are pinned as tag plus digest in `ansible/group_vars/all/versions.yml`. Versions are deliberately the same for all environments: a version change is promoted by deploying the same commit first to `test`, then to `prod`.
+
+**Ansible variables:**
+
+- Every role variable is prefixed with the role name (`chatto_version`, `backup_retention_days`, `beszel_agent_enabled`).
+- Secrets are named `vault_*` and live only in `vault.yml`. They are only referenced from the environment's `vars.yml` (`chatto_smtp_password: "{{ vault_chatto_smtp_password }}"`), so `grep` shows which secrets exist without decrypting anything.
+- Precedence: role defaults < environment `vars.yml` < `versions.yml` < generated host vars (IPs, domain).
+
+**Secret generation:** `just secrets-init <env>` runs `secrets-init.yml` locally on the admin machine. It generates every missing secret (Chatto secrets that upstream's `init-env.sh` would create, LiveKit API key and secret, VAPID keys, backup passphrase) and writes the vault back encrypted. Existing secrets are never overwritten, and no plaintext is written into the repo. Values that can't be generated (SMTP credentials, the Beszel hub key) are entered with `ansible-vault edit`. Deploys only read secrets and never create them.
+
+**Upstream files:** they start with this header, with no other changes:
+
+```text
+# Upstream: https://github.com/chattocorp/chatto/blob/v0.5.0/examples/dockercompose/<file>
+# Do not edit. Overrides go into compose.override.yml.
+```
+
+**Definition of done:** a change is done when `just lint` passes, `just deploy test` succeeds, and a second `just deploy test` reports `changed=0` (idempotency). Molecule and CI are not used in the PoC; a GitHub Action for `just lint` comes later together with Renovate.
+
+## Phases and open decisions
+
+The PoC covers phases 1 to 4 and ends with the decision in the plenum. Phases 5 and 6 only follow if the decision is positive. Each phase ends with a check before the next one starts.
+
+1. **Setup in the test project:** repo, VM and stack under `chat.cyb3rk4t.me` in Kai's Hetzner project; owner account created, backup running. Done when two tests succeed: a rebuild of the VM with the existing volume, in which all data is preserved, and a restore test. For the latter, first save the backup archive locally, then rebuild with a fresh, empty volume and restore from the archive.
+2. **Test with 5–10 people (about 4 weeks):** use chat, files, calls and push on desktop and mobile. Done when these criteria are met:
+   - The Chatto container stays below its memory limit, without OOM kills.
+   - A call with 4–5 participants runs stably, also from a mobile network.
+   - Messages arrive without noticeable delay; push works.
+   - The backup succeeds every day, and the volume has enough headroom.
+   - Feedback from testers and admins has been collected, e.g. via a short survey.
+3. **Slack import dry run in the test project:** convert the export, review the report, import into a freshly reset test instance, and record the result, duration and resource usage. Determine the size of the Slack files along the way; it determines the volume size and whether S3 is needed after all. Done when the gaps are known.
+4. **Decision in the plenum:** summarize the experience of users and admins, the resource usage and the result of the import dry run, and present it in the plenum. If the decision is negative, the test project is torn down.
+5. **Rebuild in the Kalkspace infrastructure** (only after a positive decision): roll out the same repo in a Kalkspace Hetzner project under `chat.kalk.space`, empty and without test data; set the instance size based on the measurements.
+6. **Slack migration and rollout to everyone (\~250 accounts):** import a fresh export, activate accounts, invite people, set Slack to read-only.
+
+**Open decisions**
+
+- [ ] **Activating imported accounts:** how do imported Slack accounts (without a password) get access, e.g. via a password-reset mail? And is a self-registration with the same email matched to the imported account?
+- [ ] **SMTP access:** which mail server or account is used for transactional mail, in the test and later at Kalkspace?
+- [ ] **DNS:** `cyb3rk4t.me` is hosted externally, the records are set there manually. Where is the DNS for `kalk.space` hosted?
+- [ ] **Slack plan and scope:** which Slack plan does Kalkspace have, and which data does that give us in the export (public channels, private channels, DMs, how far back)? Which channels should be migrated?
+- [ ] **Offsite backup (later):** Storage Box or existing storage in the space? Settle before the rollout to everyone at the latest.
+- [ ] **Monitoring in later operations:** what does Kalkspace use for monitoring and alerting? That determines whether Beszel stays or is replaced.
+- [ ] **Update process for pinned versions (later):** set up Renovate in the repo to open pull requests automatically for new versions of Chatto, NATS, LiveKit, Caddy and Beszel. Plus a watch on Chatto's GitHub releases and security advisories.
+- [ ] **OpenTofu state in Kalkspace operations:** in the test, the state is local. Operation by several admins needs a shared location. Options are an S3 backend (e.g. Hetzner Object Storage with a lock file), the HTTP backend of an existing GitLab or Forgejo instance of the space, or a state encrypted with OpenTofu state encryption directly in the repo. Settle before the rebuild in the Kalkspace infrastructure.
+
+## Sources
+
+- [Chatto documentation](https://docs.chatto.run)
+- Chatto docs: [Docker Compose deployment](https://docs.chatto.run/guides/deployment/docker-compose/)
+- Chatto docs: [Horizontal scaling](https://docs.chatto.run/guides/infrastructure/horizontal-scaling/)
+- Chatto docs: [Media & attachments](https://docs.chatto.run/guides/infrastructure/media-attachments/)
+- Chatto docs: [Server operations](https://docs.chatto.run/guides/operations/server-operations/)
+- [Chatto repo, examples/dockercompose (v0.5.0)](https://github.com/chattocorp/chatto)
