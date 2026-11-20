@@ -1,0 +1,30 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# OpenTofu / Terraform (state is local for now and contains secrets;
+# .terraform.lock.hcl is committed)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+
+# Ansible (the vault password file lives outside the repo; this is a safety net)
+.vault-pass*
+.vault_pass*
+*.retry
+
+# Rendered secrets (generated from the vault, never committed)
+.env
+livekit.generated.yaml
+
+# Private data: Slack exports/import archives and local copies of backups
+slack-export*/
+slack-import*/
+backups/
